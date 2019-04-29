@@ -267,6 +267,7 @@ _lp_source_config()
     local WARN_RED="${_LP_OPEN_ESC}$(ti_setaf 0 ; ti_setab 1)${_LP_CLOSE_ESC}"
     local CRIT_RED="${_LP_OPEN_ESC}${ti_bold}$(ti_setaf 7 ; ti_setab 1)${_LP_CLOSE_ESC}"
     local DANGER_RED="${_LP_OPEN_ESC}${ti_bold}$(ti_setaf 3 ; ti_setab 1)${_LP_CLOSE_ESC}"
+    local BOLD_BLINK_RED_BG="${_LP_OPEN_ESC}${ti_bold}$(tput blink ; ti_setaf 7 ; ti_setab 1)${_LP_CLOSE_ESC}"
 
     local GREEN="${_LP_OPEN_ESC}$(ti_setaf 2)${_LP_CLOSE_ESC}"
     local BOLD_GREEN="${_LP_OPEN_ESC}${ti_bold}$(ti_setaf 2)${_LP_CLOSE_ESC}"
@@ -329,6 +330,8 @@ _lp_source_config()
     LP_ENABLE_RUNTIME=${LP_ENABLE_RUNTIME:-1}
     LP_ENABLE_VIRTUALENV=${LP_ENABLE_VIRTUALENV:-1}
     LP_ENABLE_SCLS=${LP_ENABLE_SCLS:-1}
+    LP_ENABLE_KUBERNETES=${LP_ENABLE_KUBERNETES:-0}
+    LP_ENABLE_AWSVAULT=${LP_ENABLE_AWSVAULT:-0}
     LP_ENABLE_VCS_ROOT=${LP_ENABLE_VCS_ROOT:-0}
     LP_ENABLE_TITLE=${LP_ENABLE_TITLE:-0}
     LP_ENABLE_SCREEN_TITLE=${LP_ENABLE_SCREEN_TITLE:-0}
@@ -392,6 +395,10 @@ _lp_source_config()
     LP_COLOR_IN_MULTIPLEXER=${LP_COLOR_IN_MULTIPLEXER:-$BOLD_BLUE}
     LP_COLOR_RUNTIME=${LP_COLOR_RUNTIME:-$YELLOW}
     LP_COLOR_VIRTUALENV=${LP_COLOR_VIRTUALENV:-$CYAN}
+    LP_COLOR_KUBERNETES=${LP_COLOR_KUBERNETES:-$BOLD_YELLOW}
+    LP_COLOR_KUBERNETES_PROD=${LP_COLOR_KUBERNETES_PROD:-$BOLD_BLINK_RED_BG}
+    LP_COLOR_AWSVAULT=${LP_COLOR_AWSVAULT:-$PURPLE}
+    LP_COLOR_AWSVAULT_PROD=${LP_COLOR_AWSVAULT_PROD:-$BOLD_BLINK_RED_BG}
 
     if [[ -z "${LP_COLORMAP-}" ]]; then
         LP_COLORMAP=(
@@ -1392,10 +1399,12 @@ _lp_battery_color()
 _lp_color_map() {
     # Default scale: 0..100
     # Custom scale: 0..$2
-    local -i scale idx
+    local -i scale val idx
     scale=${2:-100}
+    # value cannot be larger than scale-1
+    (( $1 >= scale )) && val=scale-1 || val=$1
     # Transform the value to a 0..${#COLOR_MAP} scale
-    idx=_LP_FIRST_INDEX+100*$1/scale/${#LP_COLORMAP[*]}
+    idx=_LP_FIRST_INDEX+100*val/scale/${#LP_COLORMAP[*]}
     echo -nE "${LP_COLORMAP[idx]}"
 }
 
@@ -1486,7 +1495,7 @@ _lp_load_color()
     local -i load=${lp_cpu_load:-0}/$_lp_CPUNUM
 
     if (( load > LP_LOAD_THRESHOLD )); then
-        local ret="$(_lp_color_map $load)${LP_MARK_LOAD}"
+        local ret="$(_lp_color_map $load 200)${LP_MARK_LOAD}"
 
         if (( LP_PERCENTS_ALWAYS )); then
             ret+="${load}${_LP_PERCENT}"
@@ -1747,6 +1756,50 @@ _lp_set_prompt()
         LP_SCLS=
     fi
 
+        # Display the current Kubernetes context and namespace, if availalbe
+        if [[ $LP_ENABLE_KUBERNETES && -n "$(command -v kubectl)" ]]; then
+          LP_K8S=$(kubectl config current-context 2>/dev/null)
+          LP_K8S_NS=$(kubectl config view --output json | \
+            jq ".contexts[] | select(.name==\"${LP_K8S}\") | .context.namespace" | tr -d '"' || true)
+          if [[ -n "$LP_K8S" ]]; then
+            case "${LP_K8S}" in
+              k8s.*|*prod*)
+                LP_K8S="${LP_COLOR_KUBERNETES_PROD}${LP_K8S%%.*}:${LP_K8S_NS}${NO_COL} " ;;
+              *)
+                LP_K8S="${LP_COLOR_KUBERNETES}${LP_K8S%%.*}:${LP_K8S_NS}${NO_COL} " ;;
+            esac
+          fi
+        else
+          LP_K8S=
+        fi
+
+        # Display the current AWS_VAULT profile, if available
+        if [[ ${LP_ENABLE_AWSVAULT} && -n "$(command -v aws-vault)" ]]; then
+          LP_AWSVAULT=${AWS_VAULT}
+          if [[ -n "${LP_AWSVAULT}" ]]; then
+            # detect any assumed roles
+            local LP_AWSVAULT_ROLE=$(aws sts get-caller-identity --query Arn --output text)
+            # make assumed role timeouts visible
+            [[ ${?} -ne 0 ]] && LP_AWSVAULT="${LP_AWSVAULT}:ROLE_TIMED_OUT!"
+            # display assumed role
+            if [[ ${LP_AWSVAULT_ROLE} =~ ":assumed-role/" ]]; then
+              # without using subshell, strip off preceding ".*assumed-role/"
+              LP_AWSVAULT_ROLE=${LP_AWSVAULT_ROLE##*assumed-role/}
+              # without using subshell, strip off ending "/.*"
+              LP_AWSVAULT_ROLE=${LP_AWSVAULT_ROLE%%/*}
+              LP_AWSVAULT="${LP_AWSVAULT}:${LP_AWSVAULT_ROLE}"
+            fi
+            case "${LP_AWSVAULT}" in
+              *default*|*prod-admin*|*prod-sudo*)
+                LP_AWSVAULT="${LP_COLOR_AWSVAULT_PROD}(aws:${LP_AWSVAULT})${NO_COL} " ;;
+              *)
+                LP_AWSVAULT="${LP_COLOR_AWSVAULT}(aws:${LP_AWSVAULT})${NO_COL} " ;;
+            esac
+          fi
+        else
+          LP_AWSVAULT=
+        fi
+
     LP_RUNTIME=$(_lp_sl "$(_lp_runtime)")
 
     # if change of working directory
@@ -1840,7 +1893,7 @@ _lp_set_prompt()
 
     if [[ -z "$LP_PS1" ]]; then
         # add title escape time, jobs, load and battery
-        PS1="${LP_PS1_PREFIX}${LP_TIME}${LP_BATT}${LP_LOAD}${LP_TEMP}${LP_JOBS}"
+        PS1="${LP_PS1_PREFIX}${LP_TIME}${LP_BATT}${LP_LOAD}${LP_TEMP}${LP_JOBS}${LP_K8S}${LP_AWSVAULT}"
         # add user, host and permissions colon
         PS1+="${LP_BRACKET_OPEN}${LP_USER}${LP_HOST}${LP_PERM}"
 

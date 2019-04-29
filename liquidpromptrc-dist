@@ -134,6 +134,14 @@ LP_ENABLE_VIRTUALENV=1
 # Recommended value is 1
 LP_ENABLE_SCLS=1
 
+# Display the kubernetes context and namespace, if any
+# Recommened value is 1
+LP_ENABLE_KUBERNETES=1
+
+# Display the aws-vault context and namespace, if any
+# Recommend value is 0
+LP_ENABLE_AWSVAULT=1
+
 # Show average system temperature
 LP_ENABLE_TEMP=1
 
