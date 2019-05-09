@@ -1757,7 +1757,7 @@ _lp_set_prompt()
     fi
 
         # Display the current Kubernetes context and namespace, if availalbe
-        if [[ $LP_ENABLE_KUBERNETES && -n "$(command -v kubectl)" ]]; then
+        if [[ "${LP_ENABLE_KUBERNETES}" != "0" && -n "$(command -v kubectl)" ]]; then
           LP_K8S=$(kubectl config current-context 2>/dev/null)
           LP_K8S_NS=$(kubectl config view --output json | \
             jq ".contexts[] | select(.name==\"${LP_K8S}\") | .context.namespace" | tr -d '"' || true)
@@ -1774,7 +1774,7 @@ _lp_set_prompt()
         fi
 
         # Display the current AWS_VAULT profile, if available
-        if [[ ${LP_ENABLE_AWSVAULT} && -n "$(command -v aws-vault)" ]]; then
+        if [[ "${LP_ENABLE_AWSVAULT}" != "0" && -n "$(command -v aws-vault)" ]]; then
           LP_AWSVAULT=${AWS_VAULT}
           if [[ -n "${LP_AWSVAULT}" ]]; then
             # detect any assumed roles
