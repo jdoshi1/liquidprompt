@@ -1756,11 +1756,12 @@ _lp_set_prompt()
         LP_SCLS=
     fi
 
-        # Display the current Kubernetes context and namespace, if availalbe
+        # Display the current Kubernetes context and namespace, if available
         if [[ "${LP_ENABLE_KUBERNETES}" != "0" && -n "$(command -v kubectl)" ]]; then
           LP_K8S=$(kubectl config current-context 2>/dev/null)
           LP_K8S_NS=$(kubectl config view --output json | \
             jq ".contexts[] | select(.name==\"${LP_K8S}\") | .context.namespace" | tr -d '"' || true)
+          LP_K8S_NS="${LP_K8S_NS:-default}"
           if [[ -n "$LP_K8S" ]]; then
             case "${LP_K8S}" in
               k8s.*|*prod*)
